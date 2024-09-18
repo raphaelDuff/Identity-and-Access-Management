@@ -1,8 +1,7 @@
 import os
 from flask import Flask, request, jsonify, abort
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
-import json
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from flask_cors import CORS
 
 from .models import *
@@ -10,63 +9,23 @@ from .models import *
 
 # Enable debug mode.
 DEBUG = True
+QUESTIONS_PER_PAGE = 10
 
 
-"""
-@TODO uncomment the following line to initialize the datbase
-!! NOTE THIS WILL DROP ALL RECORDS AND START YOUR DB FROM SCRATCH
-!! NOTE THIS MUST BE UNCOMMENTED ON FIRST RUN
-!! Running this funciton will add one
-"""
-
-app = Flask(__name__)
-
-
-@app.errorhandler(400)
-def bad_request(error):
-    return (
-        jsonify({"success": False, "error": 400, "message": "bad request"}),
-        400,
-    )
+# def paginate_drinks(request, selection, page_limit_number=QUESTIONS_PER_PAGE):
+#     page = request.args.get("page", 1, type=int)
+#     start = (page - 1) * page_limit_number
+#     end = start + page_limit_number
+#     drinks = [drink.short() for drink in selection]
+#     current_drinks = drinks[start:end]
+#     return current_drinks
 
 
-@app.errorhandler(404)
-def not_found(error):
-    return (
-        jsonify({"success": False, "error": 404, "message": "resource not found"}),
-        404,
-    )
-
-
-@app.errorhandler(405)
-def not_allowed(error):
-    return (
-        jsonify({"success": False, "error": 405, "message": "method not allowed"}),
-        405,
-    )
-
-
-@app.errorhandler(422)
-def unprocessable(error):
-    return (
-        jsonify({"success": False, "error": 422, "message": "unprocessable"}),
-        422,
-    )
-
-
-@app.errorhandler(500)
-def internal_error(error):
-    return (
-        jsonify({"success": False, "error": 500, "message": "internal server error"}),
-        500,
-    )
-
-
-def create_app(test_config=None, db=db, app=app):
-
+def create_app(test_config=None, db=db):
+    app = Flask(__name__)
+    print("OOBA")
     # Initialize the app with the extension
     app.config.from_object("src.config")
-    app.config["SQLALCHEMY_ECHO"] = True
 
     if test_config:
         app.config.update(test_config)
@@ -74,6 +33,16 @@ def create_app(test_config=None, db=db, app=app):
     db.init_app(app)
     with app.app_context():
         db.create_all()
+        # drink_recipe = '[{"name": "water", "color": "blue", "parts": 1}]'
+        # drink = Drink(title="water", recipe=drink_recipe)
+        # drink2_recipe = '[{"name": "fanta", "color": "orange", "parts": 1}]'
+        # drink2 = Drink(title="fanta", recipe=drink2_recipe)
+        # drink3_recipe = '[{"name": "coca", "color": "black", "parts": 1}]'
+        # drink3 = Drink(title="coca", recipe=drink3_recipe)
+        # db.session.add(drink)
+        # db.session.add(drink2)
+        # db.session.add(drink3)
+        # db.session.commit()
 
     CORS(app, resources={r"/*": {"origins": "*"}})
 
@@ -98,6 +67,15 @@ def create_app(test_config=None, db=db, app=app):
             or appropriate status code indicating reason for failure
     """
 
+    @app.route("/drinks", methods=["GET"])
+    def get_drinks():
+        stmt_select_all_drinks = select(Drink).order_by(Drink.id)
+        drinks = db.session.scalars(stmt_select_all_drinks).all()
+        list_drinks = [drink.short() for drink in drinks]
+        if len(drinks) == 0:
+            abort(404)
+        return jsonify({"success": True, "drinks": list_drinks})
+
     """
     @TODO implement endpoint
         GET /drinks-detail
@@ -106,6 +84,15 @@ def create_app(test_config=None, db=db, app=app):
         returns status code 200 and json {"success": True, "drinks": drinks} where drinks is the list of drinks
             or appropriate status code indicating reason for failure
     """
+
+    @app.route("/drinks-detail", methods=["GET"])
+    def get_drinks_detail():
+        stmt_select_all_drinks = select(Drink).order_by(Drink.id)
+        drinks = db.session.scalars(stmt_select_all_drinks).all()
+        list_drinks = [drink.long() for drink in drinks]
+        if len(drinks) == 0:
+            abort(404)
+        return jsonify({"success": True, "drinks": list_drinks})
 
     """
     @TODO implement endpoint
@@ -139,6 +126,70 @@ def create_app(test_config=None, db=db, app=app):
         returns status code 200 and json {"success": True, "delete": id} where id is the id of the deleted record
             or appropriate status code indicating reason for failure
     """
+
+    @app.route("/drinks/<int:id>", methods=["DELETE"])
+    def delete_drink(id):
+        try:
+            stmt_drink_by_id = select(Drink).where(Drink.id == id)
+            selected_drink = db.session.scalars(stmt_drink_by_id).one_or_none()
+            if selected_drink is None:
+                abort(404)
+
+            db.session.delete(selected_drink)
+            db.session.commit()
+
+            return (
+                jsonify(
+                    {
+                        "success": True,
+                        "deleted": id,
+                    }
+                ),
+                200,
+            )
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            abort(500)
+        finally:
+            db.session.close()
+
+    @app.errorhandler(400)
+    def bad_request(error):
+        return (
+            jsonify({"success": False, "error": 400, "message": "bad request"}),
+            400,
+        )
+
+    @app.errorhandler(404)
+    def not_found(error):
+        return (
+            jsonify({"success": False, "error": 404, "message": "resource not found"}),
+            404,
+        )
+
+    @app.errorhandler(405)
+    def not_allowed(error):
+        return (
+            jsonify({"success": False, "error": 405, "message": "method not allowed"}),
+            405,
+        )
+
+    @app.errorhandler(422)
+    def unprocessable(error):
+        return (
+            jsonify({"success": False, "error": 422, "message": "unprocessable"}),
+            422,
+        )
+
+    @app.errorhandler(500)
+    def internal_error(error):
+        return (
+            jsonify(
+                {"success": False, "error": 500, "message": "internal server error"}
+            ),
+            500,
+        )
+
     return app
 
 
