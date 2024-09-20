@@ -1,10 +1,12 @@
 import os
-from flask import Flask, request, jsonify, abort
+from dotenv import load_dotenv
+from flask import Flask, request, jsonify, abort, redirect, url_for
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 
-from .models import *
+from .database.models import *
+from .auth.auth import requires_auth, AuthError
 
 
 # Enable debug mode.
@@ -23,9 +25,25 @@ QUESTIONS_PER_PAGE = 10
 
 def create_app(test_config=None, db=db):
     app = Flask(__name__)
-    print("OOBA")
+    load_dotenv()
+    # app.secret_key = os.getenv("APP_SECRET_KEY")
+
+    CORS(app, resources={r"/*": {"origins": "*"}})
+
+    # CORS Headers
+    @app.after_request
+    def after_request(response):
+        response.headers.add(
+            "Access-Control-Allow-Headers", "Content-Type,Authorization,true"
+        )
+        response.headers.add(
+            "Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS"
+        )
+        return response
+
     # Initialize the app with the extension
-    app.config.from_object("src.config")
+    app.config.from_object("src.database.config")
+    print("app config: ", app.config)
 
     if test_config:
         app.config.update(test_config)
@@ -44,29 +62,7 @@ def create_app(test_config=None, db=db):
         # db.session.add(drink3)
         # db.session.commit()
 
-    CORS(app, resources={r"/*": {"origins": "*"}})
-
-    # CORS Headers
-    @app.after_request
-    def after_request(response):
-        response.headers.add(
-            "Access-Control-Allow-Headers", "Content-Type,Authorization,true"
-        )
-        response.headers.add(
-            "Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTION"
-        )
-        return response
-
     # ROUTES
-    """
-    @TODO implement endpoint
-        GET /drinks
-            it should be a public endpoint
-            it should contain only the drink.short() data representation
-        returns status code 200 and json {"success": True, "drinks": drinks} where drinks is the list of drinks
-            or appropriate status code indicating reason for failure
-    """
-
     @app.route("/drinks", methods=["GET"])
     def get_drinks():
         stmt_select_all_drinks = select(Drink).order_by(Drink.id)
@@ -76,17 +72,9 @@ def create_app(test_config=None, db=db):
             abort(404)
         return jsonify({"success": True, "drinks": list_drinks})
 
-    """
-    @TODO implement endpoint
-        GET /drinks-detail
-            it should require the 'get:drinks-detail' permission
-            it should contain the drink.long() data representation
-        returns status code 200 and json {"success": True, "drinks": drinks} where drinks is the list of drinks
-            or appropriate status code indicating reason for failure
-    """
-
     @app.route("/drinks-detail", methods=["GET"])
-    def get_drinks_detail():
+    @requires_auth("get:drinks-detail")
+    def get_drinks_detail(token):
         stmt_select_all_drinks = select(Drink).order_by(Drink.id)
         drinks = db.session.scalars(stmt_select_all_drinks).all()
         list_drinks = [drink.long() for drink in drinks]
@@ -94,41 +82,67 @@ def create_app(test_config=None, db=db):
             abort(404)
         return jsonify({"success": True, "drinks": list_drinks})
 
-    """
-    @TODO implement endpoint
-        POST /drinks
-            it should create a new row in the drinks table
-            it should require the 'post:drinks' permission
-            it should contain the drink.long() data representation
-        returns status code 200 and json {"success": True, "drinks": drink} where drink an array containing only the newly created drink
-            or appropriate status code indicating reason for failure
-    """
+    @app.route("/drinks", methods=["POST"])
+    @requires_auth("post:drinks")
+    def post_drink(token):
+        try:
+            data = request.get_json()
+            drink_title = data.get("title", None)
+            drink_recipe = json.dumps(data.get("recipe", None))
 
-    """
-    @TODO implement endpoint
-        PATCH /drinks/<id>
-            where <id> is the existing model id
-            it should respond with a 404 error if <id> is not found
-            it should update the corresponding row for <id>
-            it should require the 'patch:drinks' permission
-            it should contain the drink.long() data representation
-        returns status code 200 and json {"success": True, "drinks": drink} where drink an array containing only the updated drink
-            or appropriate status code indicating reason for failure
-    """
+            if drink_title is None or drink_recipe is None:
+                abort(400)
 
-    """
-    @TODO implement endpoint
-        DELETE /drinks/<id>
-            where <id> is the existing model id
-            it should respond with a 404 error if <id> is not found
-            it should delete the corresponding row for <id>
-            it should require the 'delete:drinks' permission
-        returns status code 200 and json {"success": True, "delete": id} where id is the id of the deleted record
-            or appropriate status code indicating reason for failure
-    """
+            new_drink = Drink(title=drink_title, recipe=drink_recipe)
+            db.session.add(new_drink)
+            db.session.commit()
+            # return redirect(
+            #     url_for(
+            #         "get_drinks",
+            #         result=jsonify({"success": True, "drinks": new_drink.long()}),
+            #     )
+            # )
+            return (
+                jsonify({"success": True, "drinks": new_drink.long()}),
+                200,
+            )
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            abort(500)
+        finally:
+            db.session.close()
+
+    @app.route("/drinks/<int:id>", methods=["PATCH"])
+    @requires_auth("patch:drinks")
+    def update_drink(token, id):
+        try:
+            stmt_drink_by_id = select(Drink).where(Drink.id == id)
+            selected_drink = db.session.scalars(stmt_drink_by_id).one_or_none()
+            if selected_drink is None:
+                abort(404)
+
+            data = request.get_json()
+            if not data:
+                abort(400)
+            selected_drink.title = data.get("title", selected_drink.title)
+            selected_drink.recipe = json.dumps(
+                data.get("recipe", selected_drink.recipe)
+            )
+            db.session.add(selected_drink)
+            db.session.commit()
+            return (
+                jsonify({"success": True, "drinks": selected_drink.long()}),
+                200,
+            )
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            abort(500)
+        finally:
+            db.session.close()
 
     @app.route("/drinks/<int:id>", methods=["DELETE"])
-    def delete_drink(id):
+    @requires_auth("delete:drinks")
+    def delete_drink(token, id):
         try:
             stmt_drink_by_id = select(Drink).where(Drink.id == id)
             selected_drink = db.session.scalars(stmt_drink_by_id).one_or_none()
@@ -152,6 +166,17 @@ def create_app(test_config=None, db=db):
             abort(500)
         finally:
             db.session.close()
+
+    @app.route("/tabs/user-page", methods=["GET", "POST"])
+    def callback():
+        return (
+            jsonify(
+                {
+                    "success": True,
+                }
+            ),
+            200,
+        )
 
     @app.errorhandler(400)
     def bad_request(error):
@@ -189,6 +214,12 @@ def create_app(test_config=None, db=db):
             ),
             500,
         )
+
+    @app.errorhandler(AuthError)
+    def handle_auth_error(e):
+        response = jsonify(e.error)
+        response.status_code = e.status_code
+        return response
 
     return app
 

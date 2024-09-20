@@ -34,14 +34,13 @@ export class AuthService {
   // invoked in app.component on load
   check_token_fragment() {
     // parse the fragment
-    const fragment = window.location.hash.substr(1).split('&')[0].split('=');
-    // check if the fragment includes the access token
-    if ( fragment[0] === 'access_token' ) {
-      // add the access token to the jwt
-      this.token = fragment[1];
-      // save jwts to localstore
-      this.set_jwt();
-    }
+    const hash = window.location.hash.substring(1);
+	const params = new URLSearchParams(hash);
+	const token = params.get('access_token');
+    if (token) {
+		this.token = token;
+		this.set_jwt();
+	}
   }
 
   set_jwt() {
@@ -64,7 +63,12 @@ export class AuthService {
 
   decodeJWT(token: string) {
     const jwtservice = new JwtHelperService();
-    this.payload = jwtservice.decodeToken(token);
+	try {
+		this.payload = jwtservice.decodeToken(token);
+	} catch (error) {
+		console.error('Error decoding JWT:', error);
+		this.payload = null;
+	}
     return this.payload;
   }
 
