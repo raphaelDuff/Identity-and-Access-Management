@@ -167,17 +167,6 @@ def create_app(test_config=None, db=db):
         finally:
             db.session.close()
 
-    @app.route("/tabs/user-page", methods=["GET", "POST"])
-    def callback():
-        return (
-            jsonify(
-                {
-                    "success": True,
-                }
-            ),
-            200,
-        )
-
     @app.errorhandler(400)
     def bad_request(error):
         return (
