@@ -17,5 +17,9 @@ $ FLASK_APP=api.py FLASK_DEBUG=True flask run
   
 ## Frontend
 ```
+$ export NODE_OPTIONS=--openssl-legacy-provider
+```
+
+```
 $ ionic serve -c --ssl --external
 ```
