@@ -1,4 +1,21 @@
-# cd0039 Identity Access Management
+# Coffee Shop Full Stack
 
-This course has also been a part of nd0044 Full Stack Web Developer Nanodegree.
-Course instructor: Gabriel Ruttner
+## Full Stack Nano - IAM Final Project
+
+This project uses Flask and Auth0 to implement identity and access management.
+These are the goals for the project
+
+1. Display graphics representing the ratios of ingredients in each drink.
+2. Allow public users to view drink names and graphics.
+3. Allow the shop baristas to see the recipe information.
+4. Allow the shop managers to create new drinks and edit existing drinks.
+
+## Backend
+```
+$ FLASK_APP=api.py FLASK_DEBUG=True flask run
+```
+  
+## Frontend
+```
+$ ionic serve -c --ssl --external
+```
